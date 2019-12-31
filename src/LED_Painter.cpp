@@ -112,6 +112,7 @@ int start_sta(){
   Serial.println(WiFi.SSID());              // Tell us what network we're connected to
   Serial.print("IP address:\t");
   Serial.println(WiFi.localIP());           // Send the IP address of the ESP8266 to the computer
+  return 0;
 }
 
 int start_ap(){
@@ -122,7 +123,7 @@ int start_ap(){
 
   Serial.print("IP address:\t");
   Serial.println(WiFi.softAPIP());  
-
+  return 0;
 }
 
 void setup() {
@@ -230,7 +231,7 @@ String getContentType(String filename) { // convert the file extension to the MI
 }
 
 void handleRoot(){
-    String page = FPSTR(HTTP_HEAD);
+    String page = FPSTR(HTTP_HEADER);
     page.replace("{v}", "LED-Lightpainter");
     page += FPSTR(HTTP_STYLE);
     page += FPSTR(HTTP_JS_IMAGE);
@@ -249,7 +250,7 @@ void handleRoot(){
 }
 
 void handleTrigger(){
-    String page = FPSTR(HTTP_HEAD);
+    String page = FPSTR(HTTP_HEADER);
     page.replace("{v}", "Trigger");
     page += FPSTR(HTTP_STYLE);
     page += FPSTR(HTTP_JS_IMAGE);
@@ -316,7 +317,7 @@ void handleFileUpload(){ // upload a new file to the SPIFFS
 }
 
 void handleFileUploadDialog(){
-    String page = FPSTR(HTTP_HEAD);
+    String page = FPSTR(HTTP_HEADER);
     page.replace("{v}", "File Upload");
     page += FPSTR(HTTP_STYLE);
     page += FPSTR(HTTP_JS_IMAGE);
@@ -334,7 +335,7 @@ void handleFileUploadDialog(){
 }
 
 void handleSuccess(){
-  String page = FPSTR(HTTP_HEAD);
+  String page = FPSTR(HTTP_HEADER);
     page.replace("{v}", "Upload Success");
     page += FPSTR(HTTP_STYLE);
     page += FPSTR(HTTP_HEAD_END);
@@ -354,8 +355,7 @@ const String formatBytes(size_t const& bytes) {            // lesbare Anzeige de
 void handleFileList(){
     FSInfo fs_info;  SPIFFS.info(fs_info);    // Füllt FSInfo Struktur mit Informationen über das Dateisystem
     Dir dir = SPIFFS.openDir("/");            // Auflistung aller im Spiffs vorhandenen Dateien
-    String page = FPSTR(HTTP_HEAD);
-    int i=0;
+    String page = FPSTR(HTTP_HEADER);
     page.replace("{v}", "List Images");
     page += FPSTR(HTTP_STYLE);
     page += FPSTR(HTTP_JS_IMAGE);
@@ -429,7 +429,7 @@ void handleConfig(){
       }
     }
       
-  String page = FPSTR(HTTP_HEAD);
+  String page = FPSTR(HTTP_HEADER);
   page.replace("{v}", "Config");
   page += FPSTR(HTTP_STYLE);
   page += FPSTR(HTTP_HEAD_END);
@@ -489,7 +489,7 @@ void handleConfig(){
 void handleBrowseWifi(){
   int numberOfNetworks = WiFi.scanNetworks();
 
-  String page = FPSTR(HTTP_HEAD);
+  String page = FPSTR(HTTP_HEADER);
   page.replace("{v}", "Browse Wifi");
   page += FPSTR(HTTP_STYLE);
   page += FPSTR(HTTP_HEAD_END);
@@ -512,8 +512,7 @@ void handleBrowseWifi(){
 }
 
 int write_config(){
-  DynamicJsonBuffer jsonBuffer;
-  JsonObject &root = jsonBuffer.createObject();
+  DynamicJsonDocument root(1024);
   File file = SPIFFS.open(config_filename, "w");
 
   root["no_LEDs"] = configuration.no_of_leds;
@@ -529,7 +528,7 @@ int write_config(){
   root["ap_ssid"] = configuration.ap_ssid;
   root["ap_pass"] = configuration.ap_pass;
 
-  if (root.printTo(file) == 0) {
+  if (serializeJson(root,file) == 0) {
     Serial.println(F("Failed to write to file"));
     file.close();
     return -1;
@@ -539,9 +538,8 @@ int write_config(){
 }
 
 int load_config(){
-    DynamicJsonBuffer jsonBuffer;
+    DynamicJsonDocument root(1024);
     File file = SPIFFS.open(config_filename, "r");
-    JsonObject &root = jsonBuffer.parseObject(file);;
         
     configuration.no_of_leds = root["no_LEDs"];
     configuration.led_pin = root["LED_pin"];
@@ -582,17 +580,14 @@ void drawBMP(char *filename) {
   uint32_t rowSize;               // Not always = bmpWidth; may have padding
   //uint8_t  sdbuffer[3 * BUFF_SIZE];    // SD read pixel buffer (8 bits each R+G+B per pixel)
   uint8_t * sdbuffer = (uint8_t *)malloc(configuration.no_of_leds *3);
-  boolean  goodBmp = false;            // Flag set to true on valid header parse
-  int16_t  w, h, row, col,i;             // to store width, height, row and column
+  int16_t  w, h, i;             // to store width, height, row and column
   //uint8_t  r, g, b;   // brg encoding line concatenated for speed so not used
-  uint8_t rotation;     // to restore rotation
-  uint8_t  tft_ptr = 0;  // buffer pointer
 
   
 
   SPIFFS.begin();
   // Check file exists and open it
-  if ((bmpFile = SPIFFS.open(filename, "r")) == NULL) {
+  if ((bmpFile = SPIFFS.open(filename, "r")) == 0) {
     Serial.println(F("File not found")); // Can comment out if not needed
     free(sdbuffer);
     return;
