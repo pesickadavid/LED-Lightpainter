@@ -205,7 +205,7 @@ void loop() {
     //still pressed
     if(digitalRead(configuration.trigger_pin) == 0){
       Serial.println(millis());
-      delay(3000); //just wait 3 seconds until drawing bitmap
+      delay(500); 
       drawBMP(configuration.image_to_draw);
       Serial.print("Drawing done ");
       Serial.println(millis());
@@ -231,7 +231,7 @@ String getContentType(String filename) { // convert the file extension to the MI
 }
 
 void handleRoot(){
-    String page = FPSTR(HTTP_HEADER);
+    String page = FPSTR(HTTP_HEAD_START);
     page.replace("{v}", "LED-Lightpainter");
     page += FPSTR(HTTP_STYLE);
     page += FPSTR(HTTP_JS_IMAGE);
@@ -250,7 +250,7 @@ void handleRoot(){
 }
 
 void handleTrigger(){
-    String page = FPSTR(HTTP_HEADER);
+    String page = FPSTR(HTTP_HEAD_START);
     page.replace("{v}", "Trigger");
     page += FPSTR(HTTP_STYLE);
     page += FPSTR(HTTP_JS_IMAGE);
@@ -317,7 +317,7 @@ void handleFileUpload(){ // upload a new file to the SPIFFS
 }
 
 void handleFileUploadDialog(){
-    String page = FPSTR(HTTP_HEADER);
+    String page = FPSTR(HTTP_HEAD_START);
     page.replace("{v}", "File Upload");
     page += FPSTR(HTTP_STYLE);
     page += FPSTR(HTTP_JS_IMAGE);
@@ -335,7 +335,7 @@ void handleFileUploadDialog(){
 }
 
 void handleSuccess(){
-  String page = FPSTR(HTTP_HEADER);
+  String page = FPSTR(HTTP_HEAD_START);
     page.replace("{v}", "Upload Success");
     page += FPSTR(HTTP_STYLE);
     page += FPSTR(HTTP_HEAD_END);
@@ -355,7 +355,7 @@ const String formatBytes(size_t const& bytes) {            // lesbare Anzeige de
 void handleFileList(){
     FSInfo fs_info;  SPIFFS.info(fs_info);    // Füllt FSInfo Struktur mit Informationen über das Dateisystem
     Dir dir = SPIFFS.openDir("/");            // Auflistung aller im Spiffs vorhandenen Dateien
-    String page = FPSTR(HTTP_HEADER);
+    String page = FPSTR(HTTP_HEAD_START);
     page.replace("{v}", "List Images");
     page += FPSTR(HTTP_STYLE);
     page += FPSTR(HTTP_JS_IMAGE);
@@ -429,12 +429,13 @@ void handleConfig(){
       }
     }
       
-  String page = FPSTR(HTTP_HEADER);
+  String page = FPSTR(HTTP_HEAD_START);
   page.replace("{v}", "Config");
   page += FPSTR(HTTP_STYLE);
   page += FPSTR(HTTP_HEAD_END);
 
   page += F("<h1>LED-Lightpainter Config</h1><br />");
+  page += F("<p><a href=\"/\">Home</a></p>");
   page += F("<form method=\"get\">");
   page += F("LEDs: <input type=\"text\" name=\"no_LEDs\" value=\"");
   page += configuration.no_of_leds;
@@ -489,7 +490,7 @@ void handleConfig(){
 void handleBrowseWifi(){
   int numberOfNetworks = WiFi.scanNetworks();
 
-  String page = FPSTR(HTTP_HEADER);
+  String page = FPSTR(HTTP_HEAD_START);
   page.replace("{v}", "Browse Wifi");
   page += FPSTR(HTTP_STYLE);
   page += FPSTR(HTTP_HEAD_END);
@@ -512,7 +513,8 @@ void handleBrowseWifi(){
 }
 
 int write_config(){
-  DynamicJsonDocument root(1024);
+  DynamicJsonBuffer jsonBuffer;
+  JsonObject &root = jsonBuffer.createObject();
   File file = SPIFFS.open(config_filename, "w");
 
   root["no_LEDs"] = configuration.no_of_leds;
@@ -528,7 +530,7 @@ int write_config(){
   root["ap_ssid"] = configuration.ap_ssid;
   root["ap_pass"] = configuration.ap_pass;
 
-  if (serializeJson(root,file) == 0) {
+  if (root.printTo(file) == 0) {
     Serial.println(F("Failed to write to file"));
     file.close();
     return -1;
@@ -538,8 +540,9 @@ int write_config(){
 }
 
 int load_config(){
-    DynamicJsonDocument root(1024);
+    DynamicJsonBuffer jsonBuffer;
     File file = SPIFFS.open(config_filename, "r");
+    JsonObject &root = jsonBuffer.parseObject(file);;
         
     configuration.no_of_leds = root["no_LEDs"];
     configuration.led_pin = root["LED_pin"];
@@ -580,8 +583,11 @@ void drawBMP(char *filename) {
   uint32_t rowSize;               // Not always = bmpWidth; may have padding
   //uint8_t  sdbuffer[3 * BUFF_SIZE];    // SD read pixel buffer (8 bits each R+G+B per pixel)
   uint8_t * sdbuffer = (uint8_t *)malloc(configuration.no_of_leds *3);
-  int16_t  w, h, i;             // to store width, height, row and column
+  boolean  goodBmp = false;            // Flag set to true on valid header parse
+  int16_t  w, h, row, col,i;             // to store width, height, row and column
   //uint8_t  r, g, b;   // brg encoding line concatenated for speed so not used
+  uint8_t rotation;     // to restore rotation
+  uint8_t  tft_ptr = 0;  // buffer pointer
 
   
 
@@ -648,10 +654,12 @@ void drawBMP(char *filename) {
     }
   
   bmpFile.close();
-  
+  delay(50);
   //Clear pixels
   pixels.clear();
+  delay(50);
   pixels.show();          
+  delay(50);
 
   //switch pin back to input
   pinMode(configuration.led_pin, INPUT);
