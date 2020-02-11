@@ -583,13 +583,8 @@ void drawBMP(char *filename) {
   uint32_t rowSize;               // Not always = bmpWidth; may have padding
   //uint8_t  sdbuffer[3 * BUFF_SIZE];    // SD read pixel buffer (8 bits each R+G+B per pixel)
   uint8_t * sdbuffer = (uint8_t *)malloc(configuration.no_of_leds *3);
-  boolean  goodBmp = false;            // Flag set to true on valid header parse
-  int16_t  w, h, row, col,i;             // to store width, height, row and column
+  int16_t  w, h, i;             // to store width, height, row and column
   //uint8_t  r, g, b;   // brg encoding line concatenated for speed so not used
-  uint8_t rotation;     // to restore rotation
-  uint8_t  tft_ptr = 0;  // buffer pointer
-
-  
 
   SPIFFS.begin();
   // Check file exists and open it
