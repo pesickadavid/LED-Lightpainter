@@ -79,6 +79,8 @@ String getContentType(String filename); // convert the file extension to the MIM
 bool handleFileRead(String path);       // send the right file to the client (if it exists)
 void handleFileUpload();                // upload a new file to the SPIFFS
 void handleFileUploadDialog();
+void handleFileDelete();      
+void handleFileDeleteDialog();
 void handleSuccess();
 void handleFileList();
 void handleConfig();
@@ -92,14 +94,24 @@ int start_ap();
 void drawBMP(char *filename);
 
 int start_sta(){
-  wifiMulti.addAP(configuration.sta_ssid, configuration.sta_pass);   // add Wi-Fi networks you want to connect to
+  if (strcmp(configuration.sta_ssid, "")==0)
+  {
+    // no ssid set
+    Serial.println("No SSID set");
+    return -1;
+  }
 
-    
+  // try to connect to AP
+
+  wifiMulti.addAP(configuration.sta_ssid, configuration.sta_pass);   // add Wi-Fi networks you want to connect to
+  Serial.print("SSID set to ");
+  Serial.println(configuration.sta_ssid);
   Serial.println("Connecting ...");
   int i = 0;
   while (wifiMulti.run() != WL_CONNECTED) { // Wait for the Wi-Fi to connect
     delay(1000);
-    Serial.print(++i); Serial.print(' ');
+    Serial.print(++i); 
+    Serial.print(' ');
     if(i > 10){
       Serial.println('\n');
       Serial.print("Failed to Connect: Timeout ");
@@ -131,6 +143,7 @@ void setup() {
   Serial.begin(115200);         // Start the Serial communication to send messages to the computer
   delay(10);
   Serial.println('\n');
+  Serial.println("setup");
 
   pinMode(configuration.trigger_pin, INPUT_PULLUP);
 
@@ -166,6 +179,11 @@ void setup() {
     handleFileUploadDialog();
   });
 
+  server.on("/delete", HTTP_GET, []() {                 // if the client requests the upload page
+    handleFileDeleteDialog();
+  });
+
+
   server.on("/list", HTTP_GET, [](){
       handleFileList();
   });
@@ -177,6 +195,10 @@ void setup() {
   server.on("/upload", HTTP_POST,                       // if the client posts to the upload page
     [](){ server.send(200); },                          // Send status 200 (OK) to tell the client we are ready to receive
     handleFileUpload                                    // Receive and save the file
+  );
+
+  server.on("/delete", HTTP_POST,                      
+    handleFileDelete
   );
 
   server.on("/action", HTTP_GET, [](){
@@ -284,6 +306,7 @@ void handleRoot()
     page += F("<a href=\"/config\">Configuration</a><br />");
     page += F("<a href=\"/upload\">Upload File</a><br />");
     page += F("<a href=\"/list\">Select Image</a><p />");
+    page += F("<a href=\"/delete\">Delete Image</a><p />");
 
     // calculate max current 
     // ws2812b: max 60mA per LED at full brightness and full white color
@@ -291,6 +314,20 @@ void handleRoot()
     page += F("Max current (A): ");
     page += maxCurrent;
     page += F("<br />");
+
+    FSInfo fs_info;  
+    SPIFFS.info(fs_info);    // Füllt FSInfo Struktur mit Informationen über das Dateisystem
+    Dir dir = SPIFFS.openDir("/");            // Auflistung aller im Spiffs vorhandenen Dateien
+    double usedPercent = (1.0 * fs_info.usedBytes / fs_info.totalBytes) *100;
+    Serial.print("used: ");
+    Serial.println(fs_info.usedBytes);
+    Serial.print("total: ");
+    Serial.println(fs_info.totalBytes);
+
+    page += F("Used Filesystem: ");
+    page += usedPercent;
+    page += F(" % <br />");
+
 
     if (strcmp(configuration.image_to_draw, "")!=0)
     {
@@ -305,10 +342,12 @@ void handleRoot()
       page += F("<br />");
       page += F("<form action=\"/action\" method=\"get\"><button name=\"action\" value=\"trigger\" type=\"submit\">Draw Image</button></form>");
     }
-
-   
     
     page += FPSTR(HTML_END);
+
+ 
+
+    
 
     server.send(200, "text/html", page);
 }
@@ -378,6 +417,31 @@ void handleFileUpload(){ // upload a new file to the SPIFFS
   }
 }
 
+
+void handleFileDelete()
+{ // delete file from SPIFFS
+
+  if(server.args() > 0 && server.hasArg("filename"))
+  {
+      Serial.print("Try delete file: ");
+      Serial.println(server.arg("filename"));
+
+      FSInfo fs_info;  
+      SPIFFS.info(fs_info);  
+      SPIFFS.remove(server.arg("filename"));
+      Serial.print("File deleted");
+
+      server.sendHeader("Location", String("/delete"), true);
+      server.send ( 302, "text/plain", "");
+      return;
+
+  }
+  server.sendHeader("Location", String("/"), true);
+  server.send ( 302, "text/plain", "");
+
+}
+
+
 void handleFileUploadDialog(){
     String page = FPSTR(HTML_HEAD_START);
     page.replace("{v}", "File Upload");
@@ -389,6 +453,50 @@ void handleFileUploadDialog(){
     page += F("<form action=\"/upload\" method=\"POST\" enctype=\"multipart/form-data\">");
     page += F("<input type=\"file\" name=\"data\">");
     page += F("<input type=\"submit\" value=\"Upload\">");
+    page += F("</form>");
+    page += FPSTR(HTML_END);
+
+   
+}
+
+void handleFileDeleteDialog(){
+    String page = FPSTR(HTML_HEAD_START);
+    page.replace("{v}", "File Deletion");
+    page += FPSTR(HTML_STYLE);
+    page += FPSTR(HTML_JS_IMAGE);
+    page += FPSTR(HTML_HEAD_END);
+    page += F("<button class=\"home\" onclick='document.location.href=\"/\"'>Home</button>");
+    page += F("<h1>File Deletion</h1><br />");
+
+
+    FSInfo fs_info;  
+    SPIFFS.info(fs_info);    // Füllt FSInfo Struktur mit Informationen über das Dateisystem
+    Dir dir = SPIFFS.openDir("/");            // Auflistung aller im Spiffs vorhandenen Dateien
+
+    page += F("Total size (Bytes): ");
+    page += fs_info.totalBytes;
+    page += F("<br />");
+
+    page += F("Used (Bytes): ");
+    page += fs_info.usedBytes;
+    page += F("<br />");
+
+    page += F("<form action=\"/delete\" method=\"post\">");
+    page += F("<select name=\"filename\" size=\"10\">");
+    while (dir.next()) {
+        if(!dir.fileName().endsWith(".bmp"))
+          continue;
+        page += F("<option value=\"");
+        page += dir.fileName(); //with "/"
+        page += String("\">") + dir.fileName().substring(1) ;
+        page += F("</option>");
+    }
+    page += F("</select>");
+    page += F("<button type=\"submit\">Delete</button></form>");
+    
+    page += FPSTR(HTML_END);
+
+    server.send(200, "text/html", page);
     page += F("</form>");
     page += FPSTR(HTML_END);
 
