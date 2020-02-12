@@ -56,8 +56,6 @@ const uint8_t gamma8[] = {
   177,180,182,184,186,189,191,193,196,198,200,203,205,208,210,213,
   215,218,220,223,225,228,231,233,236,239,241,244,247,249,252,255 };
 
-
-
 struct Config{
   int no_of_leds;
   int led_pin;
@@ -69,12 +67,13 @@ struct Config{
   char sta_pass[64];
   char ap_ssid[32];
   char ap_pass[32];
+  int brightness;
 };
 
 #define TRIGGER_PIN D2
 
 const char *config_filename = "/config.json"; 
-Config configuration = {60,14,20,TRIGGER_PIN,"/test.bmp","sta","YourSSID","YourPass","LED_PainterAP","ledpainter"};
+Config configuration = {60,14,20,TRIGGER_PIN,"/test.bmp","sta","YourSSID","YourPass","LED_PainterAP","ledpainter", 50};
 
 String getContentType(String filename); // convert the file extension to the MIME type
 bool handleFileRead(String path);       // send the right file to the client (if it exists)
@@ -213,6 +212,50 @@ void loop() {
   }
 }
 
+uint16_t read16(File& f) {
+  uint16_t result;
+  ((uint8_t *)&result)[0] = f.read(); // LSB
+  ((uint8_t *)&result)[1] = f.read(); // MSB
+  return result;
+}
+
+uint32_t read32(File& f) {
+  uint32_t result;
+  ((uint8_t *)&result)[0] = f.read(); // LSB
+  ((uint8_t *)&result)[1] = f.read();
+  ((uint8_t *)&result)[2] = f.read();
+  ((uint8_t *)&result)[3] = f.read(); // MSB
+  return result;
+}
+
+int calculateLines(char *filename)
+{
+    File bmpFile;
+    uint8_t * sdbuffer = (uint8_t *)malloc(configuration.no_of_leds *3);
+    int16_t  bmpHeight = 0;
+
+    SPIFFS.begin();
+    if ((bmpFile = SPIFFS.open(filename, "r")) == 0) 
+    {
+      Serial.println(F("File not found")); // Can comment out if not needed
+      free(sdbuffer);
+      return bmpHeight;
+    }
+
+    if (read16(bmpFile) == 0x4D42)
+    { // BMP file start signature check
+      read32(bmpFile);       // Dummy read to throw away and move on
+      read32(bmpFile);       // Read & ignore creator bytes
+      read32(bmpFile); // Start of image data
+      read32(bmpFile);       // Dummy read to throw away and move on
+      read32(bmpFile);  // Image width
+      bmpHeight = read32(bmpFile);  // Image height
+    }
+    Serial.print(F("Image height: ")); // Can comment out if not needed
+    Serial.println(bmpHeight);
+    return bmpHeight;
+}
+
 String getContentType(String filename) { // convert the file extension to the MIME type
   if (filename.endsWith(".html")) return "text/html";
   else if(filename.endsWith(".htm")) return "text/html";
@@ -230,45 +273,65 @@ String getContentType(String filename) { // convert the file extension to the MI
   return "text/plain";
 }
 
-void handleRoot(){
-    String page = FPSTR(HTTP_HEAD_START);
+void handleRoot()
+{
+    String page = FPSTR(HTML_HEAD_START);
     page.replace("{v}", "LED-Lightpainter");
-    page += FPSTR(HTTP_STYLE);
-    page += FPSTR(HTTP_JS_IMAGE);
-    page += FPSTR(HTTP_HEAD_END);
+    page += FPSTR(HTML_STYLE);
+    page += FPSTR(HTML_JS_IMAGE);
+    page += FPSTR(HTML_HEAD_END);
     page += F("<h1>LED-Lightpainter</h1><br />");
     page += F("<a href=\"/config\">Configuration</a><br />");
     page += F("<a href=\"/upload\">Upload File</a><br />");
     page += F("<a href=\"/list\">Select Image</a><p />");
-    page += F("<form action=\"/action\" method=\"get\"><button name=\"action\" value=\"trigger\" type=\"submit\">Draw Image</button></form>");
 
-    page += FPSTR(HTTP_END);
+    // calculate max current 
+    // ws2812b: max 60mA per LED at full brightness and full white color
+    double maxCurrent = configuration.no_of_leds * 0.06 * configuration.brightness / 255; 
+    page += F("Max current (A): ");
+    page += maxCurrent;
+    page += F("<br />");
+
+    if (strcmp(configuration.image_to_draw, "")!=0)
+    {
+      int lines = calculateLines(configuration.image_to_draw);
+      int linetime = configuration.line_time;
+      double duration = lines*linetime/1000;
+      page += F("Selected image: ");
+      page += FPSTR(configuration.image_to_draw);
+      page += F("<br />");
+      page += F("Duration (sec): ");
+      page += duration;
+      page += F("<br />");
+      page += F("<form action=\"/action\" method=\"get\"><button name=\"action\" value=\"trigger\" type=\"submit\">Draw Image</button></form>");
+    }
+
+   
+    
+    page += FPSTR(HTML_END);
 
     server.send(200, "text/html", page);
-
-
 }
 
 void handleTrigger(){
-    String page = FPSTR(HTTP_HEAD_START);
+    String page = FPSTR(HTML_HEAD_START);
     page.replace("{v}", "Trigger");
-    page += FPSTR(HTTP_STYLE);
-    page += FPSTR(HTTP_JS_IMAGE);
-    page += FPSTR(HTTP_HEAD_END);
+    page += FPSTR(HTML_STYLE);
+    page += FPSTR(HTML_JS_IMAGE);
+    page += FPSTR(HTML_HEAD_END);
     page += F("<h1>LED-Lightpainter</h1><br />");
-    page += F("<a href=\"/\">Back to Index</a><br />");
-    if(server.hasArg("action")){
+    page += F("<button class=\"home\" onclick='document.location.href=\"/\"'>Home</button>");
+    page += F("Drawing image now<br />");
+
+    page += FPSTR(HTML_END);
+
+    server.send(200, "text/html", page);
+
+     if(server.hasArg("action")){
       if(server.arg("action").equals("trigger")){
-        page += F("Drawing in 3 Seconds<br />");
-        
         drawBMP(configuration.image_to_draw);
       }
     }
-    page += FPSTR(HTTP_END);
-
-    server.send(200, "text/html", page);
-    
-
 }
 
 
@@ -282,7 +345,6 @@ bool handleFileRead(String path) { // send the right file to the client (if it e
       path += ".gz";                                         // Use the compressed verion
     File file = SPIFFS.open(path, "r");                    // Open the file
     size_t sent = server.streamFile(file, contentType);    // Send it to the client
-
     
     file.close();                                          // Close the file again
     Serial.println(String("\tSent file: ") + path);
@@ -317,33 +379,32 @@ void handleFileUpload(){ // upload a new file to the SPIFFS
 }
 
 void handleFileUploadDialog(){
-    String page = FPSTR(HTTP_HEAD_START);
+    String page = FPSTR(HTML_HEAD_START);
     page.replace("{v}", "File Upload");
-    page += FPSTR(HTTP_STYLE);
-    page += FPSTR(HTTP_JS_IMAGE);
-    page += FPSTR(HTTP_HEAD_END);
+    page += FPSTR(HTML_STYLE);
+    page += FPSTR(HTML_JS_IMAGE);
+    page += FPSTR(HTML_HEAD_END);
+    page += F("<button class=\"home\" onclick='document.location.href=\"/\"'>Home</button>");
     page += F("<h1>File Upload</h1><br />");
     page += F("<form action=\"/upload\" method=\"POST\" enctype=\"multipart/form-data\">");
     page += F("<input type=\"file\" name=\"data\">");
     page += F("<input type=\"submit\" value=\"Upload\">");
     page += F("</form>");
-    
-    page += FPSTR(HTTP_END);
+    page += FPSTR(HTML_END);
 
     server.send(200, "text/html", page);
-
 }
 
 void handleSuccess(){
-  String page = FPSTR(HTTP_HEAD_START);
+  String page = FPSTR(HTML_HEAD_START);
     page.replace("{v}", "Upload Success");
-    page += FPSTR(HTTP_STYLE);
-    page += FPSTR(HTTP_HEAD_END);
+    page += FPSTR(HTML_STYLE);
+    page += FPSTR(HTML_HEAD_END);
 
     page += F("<h1>ESP8266 SPIFFS File Upload Successful</h1>");
-    page += F("<p><a href=\"/\">Home</a></p>");
+    page += F("<button class=\"home\" onclick='document.location.href=\"/\"'>Home</button>");
 
-    page += FPSTR(HTTP_END);
+    page += FPSTR(HTML_END);
     server.send(200, "text/html", page);
 }
 
@@ -351,15 +412,15 @@ const String formatBytes(size_t const& bytes) {            // lesbare Anzeige de
   return (bytes < 1024) ? String(bytes) + " Byte" : (bytes < (1024 * 1024)) ? String(bytes / 1024.0) + " KB" : String(bytes / 1024.0 / 1024.0) + " MB";
 }
 
-
 void handleFileList(){
     FSInfo fs_info;  SPIFFS.info(fs_info);    // Füllt FSInfo Struktur mit Informationen über das Dateisystem
     Dir dir = SPIFFS.openDir("/");            // Auflistung aller im Spiffs vorhandenen Dateien
-    String page = FPSTR(HTTP_HEAD_START);
+    String page = FPSTR(HTML_HEAD_START);
     page.replace("{v}", "List Images");
-    page += FPSTR(HTTP_STYLE);
-    page += FPSTR(HTTP_JS_IMAGE);
-    page += FPSTR(HTTP_HEAD_END);
+    page += FPSTR(HTML_STYLE);
+    page += FPSTR(HTML_JS_IMAGE);
+    page += FPSTR(HTML_HEAD_END);
+    page += F("<button class=\"home\" onclick='document.location.href=\"/\"'>Home</button>");
     page += F("<form action=\"/config\" method=\"get\">");
     page += F("<select name=\"image\" size=\"10\" onchange=\"setImage(this)\">");
     while (dir.next()) {
@@ -374,8 +435,8 @@ void handleFileList(){
     page += F("</select>");
     page += F("<button type=\"submit\">Select</button></form>");
     page += F("<br /><img id=\"PrevImg\" src=\"\" />");
-
-    page += FPSTR(HTTP_END);
+    
+    page += FPSTR(HTML_END);
 
     server.send(200, "text/html", page);
 
@@ -394,6 +455,8 @@ void handleConfig(){
       configuration.line_time = server.arg("line_time").toInt();  
     if(server.hasArg("trigger_pin"))
       configuration.led_pin = server.arg("LED_pin").toInt();
+    if(server.hasArg("brightness"))
+      configuration.brightness = server.arg("brightness").toInt();
     if(server.hasArg("image")){
       filename = server.arg("image");
       if(!filename.startsWith("/")) filename = "/"+filename;
@@ -429,31 +492,40 @@ void handleConfig(){
       }
     }
       
-  String page = FPSTR(HTTP_HEAD_START);
+  String page = FPSTR(HTML_HEAD_START);
   page.replace("{v}", "Config");
-  page += FPSTR(HTTP_STYLE);
-  page += FPSTR(HTTP_HEAD_END);
+  page += FPSTR(HTML_STYLE);
+  page += FPSTR(HTML_HEAD_END);
 
   page += F("<h1>LED-Lightpainter Config</h1><br />");
-  page += F("<p><a href=\"/\">Home</a></p>");
+  page += F("<button class=\"home\" onclick='document.location.href=\"/\"'>Home</button>");
   page += F("<form method=\"get\">");
-  page += F("LEDs: <input type=\"text\" name=\"no_LEDs\" value=\"");
+
+  page += F("Number of LEDs: <input type=\"text\" name=\"no_LEDs\" value=\"");
   page += configuration.no_of_leds;
   page += F("\" /><br />");
+
   page += F("LED Pin: <input type=\"text\" name=\"LED_pin\" value=\"");
   page += configuration.led_pin;
   page += F("\" /><br />");
-  page += F("Line Time: <input type=\"text\" name=\"line_time\" value=\"");
+
+  page += F("LED Brightness (1-255): <input type=\"text\" name=\"brightness\" value=\"");
+  page += configuration.brightness;
+  page += F("\" /><br />");
+
+  page += F("Line Time (ms): <input type=\"text\" name=\"line_time\" value=\"");
   page += configuration.line_time;
   page += F("\" /><br />");
+
   page += F("Trigger Pin: <input type=\"text\" name=\"trigger_pin\" value=\"");
   page += configuration.trigger_pin;
   page += F("\" /><br />");
+
   page += F("Image: <input type=\"text\" name=\"image\" value=\"");
   page += configuration.image_to_draw;
   page += F("\" /><p />");
-  page += F("<button type=\"submit\" name=\"action\" value=\"browse_file\">Browse</button><p />");
 
+  page += F("<button type=\"submit\" name=\"action\" value=\"browse_file\">Browse</button><p />");
   page += F("<h2>WiFi</h2><br />");
 
   page += F("<input class=\"radio\" type=\"radio\" name=\"wifi_mode\" value=\"sta\"");
@@ -481,7 +553,7 @@ void handleConfig(){
   page += F("</form>");
   page += F("</div></body></html>");
 
-  page += FPSTR(HTTP_END);
+  page += FPSTR(HTML_END);
 
   server.send(200, "text/html", page);
 
@@ -490,10 +562,10 @@ void handleConfig(){
 void handleBrowseWifi(){
   int numberOfNetworks = WiFi.scanNetworks();
 
-  String page = FPSTR(HTTP_HEAD_START);
+  String page = FPSTR(HTML_HEAD_START);
   page.replace("{v}", "Browse Wifi");
-  page += FPSTR(HTTP_STYLE);
-  page += FPSTR(HTTP_HEAD_END);
+  page += FPSTR(HTML_STYLE);
+  page += FPSTR(HTML_HEAD_END);
 
   page += F("<form action=\"/config\" method=\"get\">");
   page += F("<select name=\"sta_ssid\" size=\"10\">");
@@ -506,7 +578,7 @@ void handleBrowseWifi(){
   }
   page += F("</select>");
   page += F("<button type=\"submit\">Select</button></form>");
-  page += FPSTR(HTTP_END);
+  page += FPSTR(HTML_END);
 
   server.send(200, "text/html", page);
 
@@ -522,9 +594,8 @@ int write_config(){
   root["line_time"] = configuration.line_time;
   root["trigger_pin"] = configuration.trigger_pin;
   root["image"] = configuration.image_to_draw;
-
+  root["brightness"] = configuration.brightness;
   root["wifi_mode"] = configuration.wifi_mode;
-  
   root["sta_ssid"] = configuration.sta_ssid;
   root["sta_pass"] = configuration.sta_pass;
   root["ap_ssid"] = configuration.ap_ssid;
@@ -548,31 +619,16 @@ int load_config(){
     configuration.led_pin = root["LED_pin"];
     configuration.line_time = root["line_time"];
     configuration.trigger_pin = root["trigger_pin"];
+    configuration.brightness = root["brightness"];
+
     strncpy(configuration.image_to_draw, root["image"], sizeof(configuration.image_to_draw));
     strncpy(configuration.wifi_mode,root["wifi_mode"],sizeof(configuration.wifi_mode));
-    
     strncpy(configuration.sta_ssid, root["sta_ssid"], sizeof(configuration.sta_ssid));
     strncpy(configuration.sta_pass, root["sta_pass"], sizeof(configuration.sta_pass));
     strncpy(configuration.ap_ssid, root["ap_ssid"], sizeof(configuration.ap_ssid));
     strncpy(configuration.ap_pass, root["ap_pass"], sizeof(configuration.ap_pass));
     file.close();
     return 0;
-}
-
-uint16_t read16(File& f) {
-  uint16_t result;
-  ((uint8_t *)&result)[0] = f.read(); // LSB
-  ((uint8_t *)&result)[1] = f.read(); // MSB
-  return result;
-}
-
-uint32_t read32(File& f) {
-  uint32_t result;
-  ((uint8_t *)&result)[0] = f.read(); // LSB
-  ((uint8_t *)&result)[1] = f.read();
-  ((uint8_t *)&result)[2] = f.read();
-  ((uint8_t *)&result)[3] = f.read(); // MSB
-  return result;
 }
 
 void drawBMP(char *filename) {
@@ -596,6 +652,7 @@ void drawBMP(char *filename) {
   pinMode(configuration.led_pin, OUTPUT);
 
   Adafruit_NeoPixel pixels = Adafruit_NeoPixel(configuration.no_of_leds, configuration.led_pin, NEO_GRB + NEO_KHZ800);
+  pixels.setBrightness(configuration.brightness);
   
 
   // Parse BMP header to get the information we need
