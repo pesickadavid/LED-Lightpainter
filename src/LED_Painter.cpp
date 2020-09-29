@@ -70,10 +70,10 @@ struct Config{
   int brightness;
 };
 
-#define TRIGGER_PIN D2
+#define TRIGGER_PIN D6
 
 const char *config_filename = "/config.json"; 
-Config configuration = {60,14,20,TRIGGER_PIN,"/test.bmp","sta","YourSSID","YourPass","LED_PainterAP","ledpainter", 50};
+Config configuration = {144,13,20,TRIGGER_PIN,"/test.bmp","sta","YourSSID","YourPass","LED_LightStickAP","trexjede", 50};
 
 String getContentType(String filename); // convert the file extension to the MIME type
 bool handleFileRead(String path);       // send the right file to the client (if it exists)
@@ -298,11 +298,11 @@ String getContentType(String filename) { // convert the file extension to the MI
 void handleRoot()
 {
     String page = FPSTR(HTML_HEAD_START);
-    page.replace("{v}", "LED-Lightpainter");
+    page.replace("{v}", "LED-LightStick");
     page += FPSTR(HTML_STYLE);
     page += FPSTR(HTML_JS_IMAGE);
     page += FPSTR(HTML_HEAD_END);
-    page += F("<h1>LED-Lightpainter</h1><br />");
+    page += F("<h1>LED-LightStick</h1><br />");
     page += F("<a href=\"/config\">Configuration</a><br />");
     page += F("<a href=\"/upload\">Upload File</a><br />");
     page += F("<a href=\"/list\">Select Image</a><p />");
@@ -358,7 +358,7 @@ void handleTrigger(){
     page += FPSTR(HTML_STYLE);
     page += FPSTR(HTML_JS_IMAGE);
     page += FPSTR(HTML_HEAD_END);
-    page += F("<h1>LED-Lightpainter</h1><br />");
+    page += F("<h1>LED-LightStick</h1><br />");
     page += F("<button class=\"home\" onclick='document.location.href=\"/\"'>Home</button>");
     page += F("Drawing image now<br />");
 
@@ -456,6 +456,7 @@ void handleFileUploadDialog(){
     page += F("</form>");
     page += FPSTR(HTML_END);
 
+    server.send(200, "text/html", page);
    
 }
 
@@ -605,7 +606,7 @@ void handleConfig(){
   page += FPSTR(HTML_STYLE);
   page += FPSTR(HTML_HEAD_END);
 
-  page += F("<h1>LED-Lightpainter Config</h1><br />");
+  page += F("<h1>LED-LightStick Config</h1><br />");
   page += F("<button class=\"home\" onclick='document.location.href=\"/\"'>Home</button>");
   page += F("<form method=\"get\">");
 
